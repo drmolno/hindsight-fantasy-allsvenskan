@@ -1,0 +1,22 @@
+#quarto-margin-sidebar {
+  width: 100px !important;
+  max-width: 100px !important;
+}
+
+main.content {
+  max-width: none !important;
+  width: 100% !important;
+}
+
+.cell-output-display {
+  width: 100%;
+}
+
+.cell {
+  width: 100%;
+}
+/*
+body {
+#  background-color: red !important;
+#}
+*/

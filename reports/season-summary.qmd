@@ -1,0 +1,36 @@
+---
+title: "Season Summary"
+page-layout: full
+---
+## Overview
+
+:::{.column-screen-inset}
+```{python}
+#| echo: false
+import sys
+sys.path.append("..")
+from core.report import build_season_grid
+from core.io import load_solution, load_parquet, OUT_DIR
+
+picks, chips = load_solution(through_gw=8)
+stats = load_parquet("player_data.parquet", OUT_DIR)
+names = load_parquet("names.parquet", OUT_DIR)
+
+grid = build_season_grid(picks, stats, names, chips)
+```
+
+```{python}
+#| echo: false
+styled = (
+    grid.style
+    .set_table_attributes('style="overflow-x:auto; display:block; width:100%;"')
+    .set_table_styles([
+        {"selector": "table", "props": "font-size: 0.9em; width: 100%;"},
+        {"selector": "tr", "props": "border-bottom: 1px solid #ddd;"},
+        {"selector": ".starters-end", "props": "border-bottom: 3px solid #333;"},
+        {"selector": "th, td", "props": "padding: 6px 10px; text-align: center; min-width: 160px;"},
+        {"selector": "th", "props": "background-color: #f5f5f5;"},
+    ])
+)
+styled
+```
