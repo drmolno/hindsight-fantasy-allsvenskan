@@ -30,3 +30,5 @@ Thumbs.db
 # Secrets — never commit these
 .env
 *.key
+
+todo.txt
