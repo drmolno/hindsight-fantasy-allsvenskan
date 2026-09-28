@@ -2,7 +2,7 @@ import pulp
 import pandas as pd
 
 from optimizer.variables import build_keys, build_lookups, build_selection_variables, build_budget_variables, build_transfer_variables, build_captain_variables, build_chip_variables, build_dynamic_duo_linearization_variables, build_pdbus_variables, build_pdbus_linearization_variables, build_pdbus_captain_suppression_variables, build_wildcard_variables, build_uteam_variables, build_uteam_budget_variables
-from optimizer.constraints import add_squad_start_link, add_squad_composition, add_formation, add_team_limit, add_buy_sell_link, add_bought_price_tracking, add_bank_balance, add_sale_proceeds, add_sale_proceeds_linearization, add_transfer_penalty, add_captain_constraints, add_dynamic_duo_linearization, add_chip_usage_limit, add_pdbus_linearization, add_pdbus_captain_suppression, add_chip_exclusivity, add_wildcard_window_limits, add_fielded_permanent_link, add_permanent_freeze_on_uteam, add_uteam_usage_limit, add_sale_value_if_held_linearization, add_uteam_budget
+from optimizer.constraints import add_squad_start_link, add_squad_composition, add_formation, add_team_limit, add_buy_sell_link, add_bought_price_tracking, add_bank_balance, add_sale_proceeds, add_sale_proceeds_linearization, add_transfer_penalty, add_captain_constraints, add_dynamic_duo_linearization, add_chip_usage_limit, add_pdbus_linearization, add_pdbus_captain_suppression, add_chip_exclusivity, add_wildcard_window_limits, add_fielded_permanent_link, add_permanent_freeze_on_uteam, add_uteam_usage_limit, add_sale_value_if_held_linearization, add_uteam_budget, add_gameweek_pruning
 from optimizer.objective import set_season_objective
 
 def extract_chips(gws, variables, chip_names: list[str]) -> pd.DataFrame:
@@ -13,7 +13,10 @@ def extract_chips(gws, variables, chip_names: list[str]) -> pd.DataFrame:
     return pd.DataFrame(chip_rows) if chip_rows else pd.DataFrame(columns=["gw", "chip"])
 
 
-def solve_all_gameweeks(stats: pd.DataFrame) -> pd.DataFrame:
+def solve_all_gameweeks(stats: pd.DataFrame, pruned_keys: set[tuple[int, int]] | None = None) -> tuple[pd.DataFrame, pd.DataFrame]:
+    if pruned_keys is None:
+        pruned_keys = set()
+
     prob = pulp.LpProblem("optimal_season", pulp.LpMaximize)
 
     keys = build_keys(stats)
@@ -61,10 +64,16 @@ def solve_all_gameweeks(stats: pd.DataFrame) -> pd.DataFrame:
     add_transfer_penalty(prob, keys, variables, gws)
 
     add_chip_exclusivity(prob, gws, variables, ["2capt", "pdbus","wildcard","uteam"])
-    add_wildcard_window_limits(prob, variables, gws)
+    add_wildcard_window_limits(prob, variables)
+
+    #pruned_keys = prune_by_score_per_price(stats, threshold=0)
+    #print(len(pruned_keys))
+    add_gameweek_pruning(prob, variables, pruned_keys)
 
     #prob.solve(pulp.PULP_CBC_CMD(msg=True, timeLimit = 30))
-    prob.solve(pulp.PULP_CBC_CMD(msg=True))
+    #prob.solve(pulp.PULP_CBC_CMD(msg=True))
+    prob.solve(pulp.GUROBI(msg=True))
+
     print(pulp.LpStatus[prob.status])
 
     fielded, start = variables["fielded"], variables["start"]
@@ -83,6 +92,9 @@ def solve_all_gameweeks(stats: pd.DataFrame) -> pd.DataFrame:
     picks = pd.DataFrame(rows)
 
     chips = extract_chips(gws, variables, ["2capt", "pdbus","wildcard","uteam"])
+
+    for w in sorted(gws):
+        print(w, pulp.value(variables["wildcard"][w]))
 
     return picks, chips
    

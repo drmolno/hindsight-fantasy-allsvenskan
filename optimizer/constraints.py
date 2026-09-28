@@ -359,5 +359,16 @@ def add_uteam_budget(prob, keys, variables, lookups, gws):
 
             M += count * (max_price_this_week - min_price_so_far)
 
-        print(M)
         prob += fielded_cost <= bank[w] + hypothetical_proceeds + M * (1 - uteam[w])
+
+
+def add_gameweek_pruning(prob, variables, pruned_keys: set[tuple[int, int]]):
+    """pruned_keys: set of (player_id, gw) pairs to forcibly exclude from selection that week only."""
+    permanent = variables["permanent"]
+    fielded = variables["fielded"]
+
+    for k in pruned_keys:
+        if k in permanent:
+            prob += permanent[k] == 0
+        if k in fielded:
+            prob += fielded[k] == 0

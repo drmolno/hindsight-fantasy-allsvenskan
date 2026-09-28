@@ -44,3 +44,44 @@ def find_dominated_players(stats: pd.DataFrame) -> set[int]:
                     break  # a is dominated, no need to check further
 
     return dominated
+
+
+def prune_by_score_per_price(stats: pd.DataFrame, threshold: float = -10):
+    mask = stats["points"] / stats["price"] < threshold
+    return set(stats.loc[mask, ["player_id", "gw"]].itertuples(index=False, name=None))
+
+
+#def find_score_per_price(stats: pd.DataFrame):
+#    points_wide = stats.pivot(index="player_id", columns="gw", values="points")
+#    price_wide = stats.pivot(index="player_id", columns="gw", values="price")
+#    return points_wide/price_wide
+
+
+#def prune_by_score_per_price(stats: pd.DataFrame, treshold: float = 1):
+#    pruned_keys = set()
+#    spp = find_score_per_price(stats)
+#    for player_id, gw = spp.index, spp.columns:
+#        if spp(player_id, gw) < treshold:
+#            pruned_keys.add((player_id, gw))
+#    return pruned_keys
+
+
+def prune_by_score(treshold):
+    return None
+
+
+def prune_by_three_score_per_price(stats: pd.DataFrame, threshold: float = -10) -> set[tuple[int, int]]:
+    ratio = stats["points"] / stats["price"]
+    stats = stats.assign(low=ratio < threshold)
+
+    wide = stats.pivot(index="player_id", columns="gw", values="low")
+    wide = wide.sort_index(axis=1)
+
+    prev_low = wide.shift(1, axis=1)
+    next_low = wide.shift(-1, axis=1)
+    prune_mask = wide & prev_low & next_low
+
+    pruned = prune_mask.stack()
+    pruned = pruned[pruned]
+
+    return set(pruned.index)

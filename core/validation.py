@@ -1,4 +1,5 @@
 import pandas as pd
+from budget import compute_budget_timeline
 
 
 def validate_team(picks: pd.DataFrame, chips: pd.DataFrame, stats: pd.DataFrame) -> list[str]:
@@ -53,73 +54,13 @@ def sale_price(bought_price: int, current_price: int) -> int:
     else:
         return current_price
 
-
-def validate_budget(picks: pd.DataFrame, chips: pd.DataFrame, stats: pd.DataFrame, initial_budget: float = 100.0) -> list[str]:
+def validate_budget(picks, stats, chips, initial_budget: float = 100.0) -> list[str]:
     errors = []
-    price_lookup = stats.set_index(["player_id", "gw"])["price"].to_dict()
-    chip_by_gw = chips.set_index("gw")["chip"].to_dict()
-
-    gws = sorted(picks["gw"].unique())
-    bought_price = {}
-    bank = round(initial_budget * 10)
-
-    permanent_squad = None
-
-    for gw in gws:
-        squad = set(picks.loc[picks["gw"] == gw, "player_id"])
-        chip = chip_by_gw.get(gw, "none")
-
-        if chip == "uteam":
-            sold = permanent_squad - squad
-            bought = squad - permanent_squad
-
-            temp_bank = bank
-            for pid in sold:
-                current_price = round(price_lookup[(pid, gw)] * 10)
-                temp_bank += sale_price(bought_price[pid], current_price)
-            for pid in bought:
-                price = round(price_lookup[(pid, gw)] * 10)
-                temp_bank -= price
-
-            if temp_bank < 0:
-                errors.append(f"GW{gw} (uteam): budget exceeded, bank = {temp_bank / 10:.1f}")
-
-        elif permanent_squad is None:
-            cost = 0
-            for pid in squad:
-                price = round(price_lookup[(pid, gw)] * 10)
-                bought_price[pid] = price
-                cost += price
-            bank -= cost
-
-            if bank < 0:
-                errors.append(f"GW{gw}: budget exceeded, bank = {bank / 10:.1f}")
-
-            permanent_squad = squad
-
-        else:
-            sold = permanent_squad - squad
-            bought = squad - permanent_squad
-
-            for pid in sold:
-                
-                current_price = round(price_lookup[(pid, gw)] * 10)
-                bank += sale_price(bought_price[pid], current_price)
-                del bought_price[pid]
-
-            for pid in bought:
-                price = round(price_lookup[(pid, gw)] * 10)
-                bought_price[pid] = price
-                bank -= price
-
-            if bank < 0:
-                print(f"Bank is {bank}")
-                errors.append(f"GW{gw}: budget exceeded, bank = {bank / 10:.1f}")
-
-            permanent_squad = squad
-
+    for e in compute_budget_timeline(picks, stats, chips, initial_budget):
+        if e["cash_after"] < 0:
+            label = " (uteam)" if e["temporary"] else ""
+            errors.append(f"GW{e['gw']}{label}: budget exceeded, bank = {e['cash_after'] / 10:.1f}")
     return errors
-
 
 def validate_play(picks: pd.DataFrame, chips: pd.DataFrame, stats: pd.DataFrame, initial_budget: float = 100.0) -> list[str]:
     """Run all structural/legality checks. Returns combined error list."""

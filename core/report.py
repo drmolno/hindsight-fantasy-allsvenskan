@@ -70,12 +70,39 @@ def build_season_grid(picks: pd.DataFrame, stats: pd.DataFrame, names: pd.DataFr
     return pd.concat([grid, summary])
 
 
+def build_budget_rows(timeline: list[dict], names: pd.DataFrame) -> pd.DataFrame:
+    name_of = names.set_index("player_id")["second_name"].to_dict()
+
+    rows = {
+        "squad value": {e["gw"]: f"{e['squad_value'] / 10:.1f}" for e in timeline},
+        "bank":        {e["gw"]: f"{e['bank'] / 10:.1f}" for e in timeline},
+    }
+
+    lines_by_gw = {}
+    for e in timeline:
+        tag = "*" if e["temporary"] else ""   # * marks temporary uteam swaps
+        lines = [f"-{name_of.get(p, p)} {v / 10:.1f}{tag}" for p, v in e["sold"]]
+        lines += [f"+{name_of.get(p, p)} {v / 10:.1f}{tag}" for p, v in e["bought"]]
+        lines_by_gw[e["gw"]] = lines
+
+    n_rows = max((len(l) for l in lines_by_gw.values()), default=0)
+    for i in range(n_rows):
+        rows[f"transfer {i + 1}"] = {
+            gw: (lines[i] if i < len(lines) else "") for gw, lines in lines_by_gw.items()
+        }
+
+    return pd.DataFrame(rows).T
+
+
 def print_season_grid(picks: pd.DataFrame, stats: pd.DataFrame, names: pd.DataFrame, chunk_size: int = 8) -> None:
     grid = build_season_grid(picks, stats, names)
     gws = grid.columns.tolist()
+    extras = build_budget_rows(compute_budget_timeline(picks, stats, chips), names)
+    extras = extras.reindex(columns=grid.columns, fill_value="")
+    full = pd.concat([grid, extras]).fillna("")
 
     for i in range(0, len(gws), chunk_size):
-        chunk = grid[gws[i:i + chunk_size]]
+        chunk = full[gws[i:i + chunk_size]]
         print(chunk.to_string())
         print()  # blank line between chunks
 
