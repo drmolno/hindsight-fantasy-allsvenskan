@@ -1,19 +1,5 @@
 import pulp
 
-
-#def set_points_transfer_captain_objective(prob, keys, variables, lookups, gws):
-#    start = variables["start"]
-#    captain = variables["captain"]
-#    extra = variables["extra"]
-#    points = lookups["points"]
-#
-#    base_points = pulp.lpSum(points[k] * start[k] for k in keys)
-#    captain_bonus = pulp.lpSum(points[k] * captain[k] for k in keys)  # +1x extra when captained, giving 2x total
-#    transfer_cost = 4 * pulp.lpSum(extra[w] for w in gws)
-#
-#    prob.setObjective(base_points + captain_bonus - transfer_cost)
-
-
 def set_season_objective(prob, keys, variables, lookups, gws):
     start = variables["start"]
     captain = variables["captain"]

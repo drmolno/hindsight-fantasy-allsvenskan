@@ -1,0 +1,557 @@
+---
+title: "Playing Fantasy Allsvenskan in Hindsight"
+aliases:
+  - season-summary.html   # the page's old address keeps working
+page-layout: full
+crossrefs-hover: false
+include-in-header:
+  text: |
+    <style>
+      /* figure/table references render as plain text, not links */
+      a.quarto-xref { color: inherit; text-decoration: none; pointer-events: none; cursor: text; }
+    </style>
+---
+This project explores the maximal possible Fantasy Allsvenskan 2026 score. Instead of playing the game in the standard, predictive manner, we look at the season in hindstight, with the knowledge of how all players performed, and try to figure out the play that would have given the highest number of points. We phrase the problem as an integer program. The program is rather large, and we also investigare certain approximations and clever efficient solutions. On this page we present the optimal play we have found and invite all nerds to find faster ways of getting there. The page is updated as more gameweeks are completed. 
+
+## Introduction
+[Allsvenskan](https://allsvenskan.se/) is Sweden's highest football league (21st in Europe [UEFA](https://www.uefa.com/nationalassociations/uefarankings/country/?year=2027)). Including 16 teams, from Malmö in the south, to Uppsala in central Sweden (there are no northern teams since GIF Sundsvall were relegated in 2022), the league is played over 30 gameweeks from April through November. Mjällby AIF are reigning champions with the all time 75 points record from 2025. As of September 2026, this year Sirius are on track to take their first ever trofy, though 8 gameweeks remain. 
+
+For football enthusaists who did not make it as players, *Fantasy* Allsvenskan provides an alternative chance to be the best, or at least to dominate the local friends league. Based on the enourmously popular [Fantasy Premier League](https://fantasy.premierleague.com/en/), [Fantasy Allsvenskan](https://fantasy.allsvenskan.se/) is a strategy game where the objective is to compose a squad of Allsvenskan players, who are then scored based on their real life performance. The fantasy manager who collects the most points over the whole season wins. Now while silly, this is not a simple game. With the option of transfering players between gameweeks, the selection of the starting 11 (out of the 15 player squad), and the choice of a captain (one player who's score is counted twice), all to optimize a score based on what *might* happen in the chaotic league, Fantasy Allsvenskan is a highly complex and stochastic prediction problem. 
+
+In this project, we simplify the problem by completely removing stochasticity from the equation, trying to approach the maximal *possible* score. We look at the season in hindsight, knowing exactly how many points each players scored each gameweek. If used correctly, this information *should* lead to a good score. For instance, while predicting 4 goals from Heintz against VSK is unlikely, choosing to play him, in hindsight, with the knowledge of these goals, is obvious. Now while seeing into the future is a powerful ability (which could be used to bet one's life savings on Heintz 4 goals instead of playing a childrens fantasy game), fully optimizing the decisions is still a highly complex task. Looking at the each gameweek separately, it is feasible (while not trivial, as budget and player position constraints have to be considered) to select the best players for a starting 11. However, as transfer costs and booster chips are added to the problem, the optimization complexity grows fast. 
+
+[Alpscode](https://alpscode.com/blog/hindsight-optimization/) solved the hindsight optimization problem for FPL the 2019/2020 season (this page is inspired by Alpscode's blog post) by phrasing it as a mixed-integer linear program, and found a solution which scored 4984 points, where the best predictive human player (Joshua Bull: another mathematician) scored 2557 points ([mathematical strategy explained here](https://www.youtube.com/watch?v=LzEuweGrHvc)). The rather large difference goes to show the difficulty of the prediction problem.
+
+In this project, we approach the hindsight Fantasy Allsvenskan problem, which to our knowledge has not been solved before. We phrase the problem as an integer program and solve it using highly optimized software. Given that the program is large and the optimization is slow, we also play around with effienct approximations based on preemptively pruning parts of the available choices. So far we have been able to solve the problem to proven optimality, but it takes many hours, and the problem grows with every gameweek. We therefore invite anyone to contribute smart and fast heuristics, such as new pruning strategies. Our code is available in this [github repo](https://github.com/drmolno/hindsight-fantasy-allsvenskan).
+
+*Disclaimer*. if it is not yet cristal clear, this page will not help you win the normal, predictive Fantasy Allsvenskan. Not this year nor the coming. That is, unless you can see into the future. 
+
+**Notational convention**. By *players* we mean actual Allsvenskan football players (like Lien and Hegland), and thus, we call us nerds playing the fantasy game *managers*. *Club* refers to an Allsvenskan club (in which the players play, e.g., DIF), while team means a fantasy team that a manager manages. 
+
+## Rules
+The task in Fantasy Allsvenskan is to select a squad of 15 Allsvenskan players (2 goal keepers, 5 defenders, 5 midfielders, and 3 forwards), and out of these select a starting 11 (1 keeper, 3-5 defenders, 3-5 midfielders, and 1-3 forwards), as well as a captain. There should be no more than 3 players from the same Allsvenskan club. 
+
+Points are then rewarded to all players in the starting 11 based on their real life game performance. For instance, a goal scored gives 5 points, an assist gives 3 points, and a clean sheet gives a keeper 5 points. Exact number of points awarded are described [here]((https://en.fantasy.allsvenskan.se/help/rules)). The captain gets double his amount of points. 
+
+The points are counted every gameweek (where teams can be adjusted in between) and at the end of the season, the manager with the most cumulative points over all gameweeks is the winner. Given the number or managers (58384 in 2026) compared to the mere 16 clubs, this may arguably be a greater achivement than winning Allsvenskan. 
+
+Anyhow, below we detail the squad selection rules and the important booster chips.
+
+### Budget
+Besides the position and club affiliation constraints, squad selection is limited by a finite monetary budget. Players are initially priced based roughly on how they are expected to perform, and the budget, 100 MSEK, is designed so that it is impossible to fill the team with only expected high scoring players. 
+
+Furthermore, player prices change between gameweeks depending on how many managers select them. Players that are sold may drop in price while those who are bought may become more expensive. It should be noted, though, that there is no limit on how many managers can own a certain players. The transfer process is described next.
+
+### Transfers
+Before every new gameweek, managers get the option to sell and replace their players. The updated squad of course need to respect the club affiliation and position constraints, and furthermore the budget needs to be kept. New players are always bought at current market price (which may move, as described above), but sold at either the market price, if the price has gone down since purchase, or the mean of the market price and price bought at (rounded down to nearest 0.1 MSEK) if the price has gone up since purchase. Furthermore, making a transfer comes with a penalty of 4 points. However managers get 1 free transfer every gameweek, and can save up to 5 in total.
+
+### Chips
+To complicate things further, there are booster chips can be played to advance the managers position. The high potential upside of the chips can swing a whole season, and it is important to deploy them efficently. A chip is played during a particular gameweek and all chips are played mutually exclusive.
+
+**Wildcard**. The wildcard chip allows managers to make more than the saved number of transfer, without any penalty. When the wildcard is played, the saved transfer are still saved for the coming week (but without another free transfer). There is one allowed wildcard in gameweeks 2 through 15, and one allowed wildcard in gameweeks 16 through 30.
+
+**Loan rangers**. Like the wild card chip, the loan rangers chip allows managers to make any number of transfers and furthermore, to violate the club affiliation constraints. This is the chance to fill the team with only DIF players. The caveat is that the squad is reverted back to the previous squad until the next gameweek. Loan rangers can be played once per season. 
+
+**Park the bus**. The park the bus chip affects the points scored by doubling the number of points for all defenders in the starting 11. When playing park the bus, the captain does not get double points.
+
+**Dynamic duo**. Similarly, the dynamic duo chip boosts points, by instead of doubling, tripling the captain's points, and at the same time doubling the vice captain's points. 
+
+## Data
+
+The data we used for this project is available in this [github repo](https://github.com/drmolno/hindsight-fantasy-allsvenskan). Compared to the Fantasy Allsvenskan site, which carries a lot of information about all players, including goals, assists, yellow cards, offensive actions, and so on, our data reflects only the things that affect our optimization problem. Accordingly, our main player data file contains information about player prices, positions, club affiliations, and scored points. It is structured as a [pandas](https://pandas.pydata.org/) data frame with with these four data in a row for every gameweek, for every player that is available (some players join mid season). The first rows of the data are shown in @tbl-data.
+
+```{python}
+#| label: tbl-data
+#| tbl-cap: "The first three rows of the player data: one row per player and gameweek."
+#| echo: false
+import sys
+sys.path.append("..")
+from core.io import load_parquet, OUT_DIR
+
+player_data = load_parquet("player_data.parquet", OUT_DIR)
+data_head = player_data.head(3)
+
+player_names = load_parquet("names.parquet", OUT_DIR).set_index("player_id")
+id_note = ", ".join(
+    f"player_id {pid} is {player_names.loc[pid, 'first_name']} {player_names.loc[pid, 'second_name']}"
+    for pid in data_head["player_id"].unique()
+)
+data_head
+```
+
+(Here `{python} id_note`.)
+
+It should be mentioned that a certain simplification is made here, where the logged player price is recorded at deadline day for each gameweek, while the price may have been lower or higher during the window since the previous gameweek. This means that our optimizer is more constrained, and may score lower than would have been possible in the real game (a conservative choice). Functionality for the possibility to buy a player earlier at a cheaper price earlier in the week may be added later. Alps code considers an alternative player simplification, where a player may always be bought at his lowest price, and sold at his highest, during the time since the last gameweek. This is a less constrained choice which may give a squad which would not have been feasible in the real game. 
+
+## Integer programming formulation
+
+Here follows a list of all the variables and constraints we used to phrase the integer program. 
+
+### Objective
+```python
+base_points
+    + captain_bonus
+    + two_capt_extra
+    + two_capt_vice_bonus
+    + pdbus_defender_bonus
+    - pdbus_captain_removal
+    - total_penalty
+```
+Score is counted by first adding all points of the players in the starting 11, then doubling the captain's points, then if Dynamic duo is played, add another bonus to the captain, and one to the vice captain, then if Park the bus is played, double all defenders points, but remove the captain's bonus, and finally subtract all of the penalties accumulated through transfers. 
+
+### Variables
+
+#### Player selection variables
+* `permanent` (*binary, one entry per gameweek and player*): keeps track of the players in the squad. Due to Loan rangers we have to differentiate between `permanent` and `fielded`.
+
+* `fielded` (*binary, one entry per gameweek and player*): keeps track of the players that are in the playable squad. Normal weeks, `fielded` coincides with permanent, but when Loan rangers is played, `fielded` describes the free Loan rangers team.
+
+* `start` (*binary, one entry per gameweek and player*): describes the starting 11. 
+
+* `captain` (*binary, one entry per gameweek and player*): describes the captain.
+
+* `vice` (*binary, one entry per gameweek and player*): describes the vice captain.
+
+#### Budget variables
+* `buy` (*binary, one entry per gameweek and player*): describes if a player is bought a specific gameweek.
+
+* `sell` (*binary, one entry per gameweek and player*): describes if a player is sold a specific gameweek.
+
+* `bought_price` (*integer, one entry per gameweek and player*): keeps track of the price at which players in the team were bought. 
+
+* `sale_proceeds` (*integer, one entry per gameweek and player*): price at which a player can be sold.
+
+* `sale_proceeds_actual` (*integer, one entry per gameweek and player*): money that you get from players, depending on whether they were sold or not.
+
+* `bank` (*integer, one per gameweek*): the money in the bank. 
+
+* `uteam_credit` (*integer, one per gameweek and player*): what a permanent player contributes towards the Loan rangers budget: his full price if he is kept in the Loan rangers squad, and his sale value if he is swapped out.
+
+All integer budget variables are scaled up 10 times from the displayed in-game prices. 
+
+#### Transfer variables
+* `banked` (*integer, one entry per gameweek*): keeps track of the number of banked free transfers.
+
+* `extra` (*integer*, one entry per gameweek*): keeps track of have many transfers more than the banked free transfers are made.
+
+#### Chip variables
+* `two_capt` (*binary, one entry per gameweek*): keeps track of when Dynamic Duo is played.
+
+* `cap_2c` (*binary, one entry per gameweek and player*): keeps track of the captain when Dynamic duo is played.
+
+* `vice_2c` (*binary, one entry per gameweek and player*): keeps track of the vice captain when Dynamic Duo is played.
+
+* `pdbus` (*binary, one entry per gameweek*): keeps track of when Park the bus is played.
+
+* `cap_pdbus` (*binary, one entry per gameweek and player*): keeps track of the captain when Park the bus is played. 
+
+* `uteam` (*binary, one entry per gameweek*): keeps track of when Loan rangers is played.
+
+### Constraints
+Below, $p$ is a player and $w$ a gameweek. $P_w$ is the set of players available in gameweek $w$, and $P_w^{\text{DEF}}$ the defenders among them (similarly for the other positions). The variables are the ones listed above, written with their code names, e.g. $\text{fielded}_{pw}$. Each rule is followed by the code that implements it.
+
+```{python}
+#| echo: false
+import sys
+sys.path.append("..")
+import inspect
+
+def show_source(*functions):
+    """Print the current source of the given functions as a code block (use with output: asis)."""
+    print("```python\n" + "\n\n".join(inspect.getsource(f) for f in functions) + "```")
+```
+
+#### Squad and formation
+Every gameweek the squad has exactly 2 goalkeepers, 5 defenders, 5 midfielders and 3 forwards:
+
+$$
+\sum_{p \in P_w^{\text{GK}}} \text{fielded}_{pw} = 2, \quad
+\sum_{p \in P_w^{\text{DEF}}} \text{fielded}_{pw} = 5, \quad
+\sum_{p \in P_w^{\text{MID}}} \text{fielded}_{pw} = 5, \quad
+\sum_{p \in P_w^{\text{FWD}}} \text{fielded}_{pw} = 3 .
+$$
+
+The starting 11 is taken from the squad, $\text{start}_{pw} \le \text{fielded}_{pw}$, and has exactly one goalkeeper and at least 3 defenders, 3 midfielders and 1 forward:
+
+$$
+\sum_{p \in P_w} \text{start}_{pw} = 11, \quad
+\sum_{p \in P_w^{\text{GK}}} \text{start}_{pw} = 1, \quad
+\sum_{p \in P_w^{\text{DEF}}} \text{start}_{pw} \ge 3, \quad
+\sum_{p \in P_w^{\text{MID}}} \text{start}_{pw} \ge 3, \quad
+\sum_{p \in P_w^{\text{FWD}}} \text{start}_{pw} \ge 1 .
+$$
+
+The upper limits (at most 5 defenders and so on) follow automatically from the squad size.
+
+::: {.callout-note collapse="true" title="Code: squad and formation"}
+```{python}
+#| echo: false
+#| output: asis
+from optimizer.constraints import add_squad_start_link, add_squad_composition, add_formation
+show_source(add_squad_start_link, add_squad_composition, add_formation)
+```
+:::
+
+#### Transfers and free transfers
+A transfer is a change in the permanent squad. From one gameweek to the next, a player is either bought, sold or unchanged:
+
+$$
+\text{permanent}_{pw} - \text{permanent}_{p,w-1} = \text{buy}_{pw} - \text{sell}_{pw}, \qquad \text{buy}_{pw} + \text{sell}_{pw} \le 1 .
+$$
+
+The number of transfers in gameweek $w$ is $t_w = \sum_{p} \text{buy}_{pw}$. Transfers beyond the banked free transfers are paid transfers, each costing 4 points in the objective:
+
+$$
+\text{extra}_w \ge t_w - \text{banked}_w - 16 \cdot (\text{wildcard}_w + \text{uteam}_w) .
+$$
+
+The last term switches the rule off when Wildcard or Loan rangers is played: 16 is more than the number of transfers that can ever be made in a gameweek, so the right-hand side becomes negative and no transfer is paid for. This is the standard *big-M* trick, which we use for several rules.
+
+Unused free transfers are carried over to the next gameweek, plus one new free transfer, up to a maximum of 5. On Wildcard and Loan rangers weeks the banked transfers are kept unchanged:
+
+$$
+\begin{aligned}
+\text{banked}_{w+1} &\le \text{banked}_w - t_w + \text{extra}_w + 1 && \text{(normal weeks)} \\
+\text{banked}_{w+1} &\le \text{banked}_w && \text{(Wildcard, Loan rangers)} \\
+\text{banked}_{w} &\le 5
+\end{aligned}
+$$
+
+Here $\text{banked}_w - t_w + \text{extra}_w$ is exactly the number of unused free transfers, $\max(0, \text{banked}_w - t_w)$. Only upper bounds are needed: more free transfers are never worse, so the optimizer always pushes $\text{banked}_{w+1}$ up to the largest allowed value.
+
+::: {.callout-note collapse="true" title="Code: transfers and free transfers"}
+```{python}
+#| echo: false
+#| output: asis
+from optimizer.constraints import add_buy_sell_link, add_transfer_penalty
+show_source(add_buy_sell_link, add_transfer_penalty)
+```
+:::
+
+#### Club limit
+At most 3 players in the squad may come from the same club, except on Loan rangers weeks. With $P_w^{c}$ the players of club $c$ in gameweek $w$:
+
+$$
+\sum_{p \in P_w^{c}} \text{fielded}_{pw} \le 3 + 12 \cdot \text{uteam}_w \qquad \text{for every club } c .
+$$
+
+This is the big-M trick again: on a Loan rangers week the limit becomes 15, the whole squad.
+
+::: {.callout-note collapse="true" title="Code: club limit"}
+```{python}
+#| echo: false
+#| output: asis
+from optimizer.constraints import add_team_limit
+show_source(add_team_limit)
+```
+:::
+
+#### Captaincy
+Every gameweek there is exactly one captain and one vice captain. Both must be in the starting 11, and they must be different players:
+
+$$
+\begin{aligned}
+\sum_{p \in P_w} \text{captain}_{pw} = 1, &\quad
+\sum_{p \in P_w} \text{vice}_{pw} = 1, \\
+\text{captain}_{pw} \le \text{start}_{pw}, &\quad
+\text{vice}_{pw} \le \text{start}_{pw}, \\
+\text{captain}_{pw} + \text{vice}_{pw} \le 1 &.
+\end{aligned}
+$$
+
+::: {.callout-note collapse="true" title="Code: captaincy"}
+```{python}
+#| echo: false
+#| output: asis
+from optimizer.constraints import add_captain_constraints
+show_source(add_captain_constraints)
+```
+:::
+
+#### Budget
+All money is counted in tenths, so that every price is an integer.
+
+**Purchase price.** The price a player was bought for is remembered for as long as he stays in the squad:
+
+$$
+\mathrm{bought\_price}_{pw} =
+\begin{cases}
+\text{price}_{pw} & \text{if } \text{buy}_{pw} = 1 \text{ (bought this week)}, \\
+\mathrm{bought\_price}_{p,w-1} & \text{if } \text{buy}_{pw} = 0 \text{ and } \text{permanent}_{p,w-1} = 1 \text{ (held from last week)}.
+\end{cases}
+$$
+
+Each "if" is written as a pair of big-M inequalities, for example
+$\text{price}_{pw} - M(1 - \text{buy}_{pw}) \le \mathrm{bought\_price}_{pw} \le \text{price}_{pw} + M(1 - \text{buy}_{pw})$.
+We take $M$ as small as possible, from the player's price range so far in the season, since smaller big-M values make the problem easier to solve.
+
+**Sale price.** A player sold at a profit gives back his purchase price plus half the profit, rounded down. A player sold at a loss gives back only his current price. Both cases are captured by
+
+$$
+\mathrm{sale\_proceeds}_{pw} \le \text{price}_{pw}, \qquad
+2 \cdot \mathrm{sale\_proceeds}_{pw} \le \mathrm{bought\_price}_{pw} + \text{price}_{pw} ,
+$$
+
+which together say $\mathrm{sale\_proceeds}_{pw} \le \min\left(\text{price}_{pw}, \left\lfloor \frac{\mathrm{bought\_price}_{pw} + \text{price}_{pw}}{2} \right\rfloor\right)$. The rounding down comes for free, since the variable is an integer. Only upper bounds are needed, because more money in the bank is never worse.
+
+**Bank.** The season starts with 100.0 MSEK (1000 tenths). Each gameweek the bank gains the proceeds of players sold and pays for players bought, and it may never go negative:
+
+$$
+\text{bank}_{w} = \text{bank}_{w-1} + \sum_{p} \mathrm{sale\_proceeds\_actual}_{pw} - \sum_{p} \text{price}_{pw} \cdot \text{buy}_{pw}, \qquad \text{bank}_w \ge 0 .
+$$
+
+**Products of variables.** Here we want the proceeds of players that are actually sold, $\mathrm{sale\_proceeds}_{pw} \cdot \text{sell}_{pw}$. A product of two variables is not allowed in a linear program, so a helper variable stands in for it. For a binary $x$ and a variable $0 \le y \le U$, the helper $z = x \cdot y$ is enforced by
+
+$$
+z \le y, \qquad z \le U x, \qquad z \ge y - U(1 - x) .
+$$
+
+If $x = 0$ the middle inequality forces $z = 0$, and if $x = 1$ the first and last force $z = y$. Here $U$ is the player's current price. The same trick, with two binaries ($U = 1$), is used for all the chips below.
+
+::: {.callout-note collapse="true" title="Code: budget"}
+```{python}
+#| echo: false
+#| output: asis
+from optimizer.constraints import add_bought_price_tracking, add_sale_proceeds, add_sale_proceeds_linearization, add_bank_balance
+show_source(add_bought_price_tracking, add_sale_proceeds, add_sale_proceeds_linearization, add_bank_balance)
+```
+:::
+
+#### Chips
+**When chips can be played.** Dynamic duo, Park the bus and Loan rangers can each be played once. Loan rangers and Wildcard cannot be played in the first gameweek. One Wildcard is allowed in gameweeks 2–15 and one in gameweeks 16–30, and at most one chip may be played per gameweek:
+
+$$
+\begin{aligned}
+\sum_w \mathrm{two\_capt}_w &\le 1, & \sum_w \text{pdbus}_w &\le 1, & \sum_w \text{uteam}_w &\le 1, \\
+\sum_{w=2}^{15} \text{wildcard}_w &\le 1, & \sum_{w=16}^{30} \text{wildcard}_w &\le 1, & \text{wildcard}_1 = \text{uteam}_1 &= 0, \\
+\mathrm{two\_capt}_w &+ \text{pdbus}_w &+ \text{wildcard}_w + \text{uteam}_w &\le 1 .&
+\end{aligned}
+$$
+
+::: {.callout-note collapse="true" title="Code: chip usage"}
+```{python}
+#| echo: false
+#| output: asis
+from optimizer.constraints import add_chip_usage_limit, add_uteam_usage_limit, add_wildcard_window_limits, add_chip_exclusivity
+show_source(add_chip_usage_limit, add_uteam_usage_limit, add_wildcard_window_limits, add_chip_exclusivity)
+```
+:::
+
+**Dynamic duo.** The bonus points depend on who is captain *and* whether the chip is played, so we need the products $\mathrm{cap\_2c}_{pw} = \text{captain}_{pw} \cdot \mathrm{two\_capt}_w$ and $\mathrm{vice\_2c}_{pw} = \text{vice}_{pw} \cdot \mathrm{two\_capt}_w$, written with the product trick above:
+
+$$
+\mathrm{cap\_2c}_{pw} \le \text{captain}_{pw}, \quad
+\mathrm{cap\_2c}_{pw} \le \mathrm{two\_capt}_w, \quad
+\mathrm{cap\_2c}_{pw} \ge \text{captain}_{pw} + \mathrm{two\_capt}_w - 1 ,
+$$
+
+and the same for $\mathrm{vice\_2c}$. In the objective, $\text{points}_{pw} \cdot \mathrm{cap\_2c}_{pw}$ takes the captain from double to triple points, and $\text{points}_{pw} \cdot \mathrm{vice\_2c}_{pw}$ doubles the vice captain.
+
+::: {.callout-note collapse="true" title="Code: Dynamic duo"}
+```{python}
+#| echo: false
+#| output: asis
+from optimizer.constraints import add_dynamic_duo_linearization
+show_source(add_dynamic_duo_linearization)
+```
+:::
+
+**Park the bus.** In the same way, $\mathrm{start\_pdbus}_{pw} = \text{start}_{pw} \cdot \text{pdbus}_w$ and $\mathrm{cap\_pdbus}_{pw} = \text{captain}_{pw} \cdot \text{pdbus}_w$. In the objective, $\text{points}_{pw} \cdot \mathrm{start\_pdbus}_{pw}$ is added for every defender, doubling the starting defenders, and $\text{points}_{pw} \cdot \mathrm{cap\_pdbus}_{pw}$ is subtracted, cancelling the captain's bonus.
+
+::: {.callout-note collapse="true" title="Code: Park the bus"}
+```{python}
+#| echo: false
+#| output: asis
+from optimizer.constraints import add_pdbus_linearization, add_pdbus_captain_suppression
+show_source(add_pdbus_linearization, add_pdbus_captain_suppression)
+```
+:::
+
+**Wildcard.** The Wildcard has no constraints of its own beyond when it can be played. It switches off the transfer penalty and keeps the banked transfers unchanged, as described under transfers.
+
+**Loan rangers.** On a Loan rangers week the fielded squad may be anything, while the permanent squad stays untouched, so that the team reverts the following week. The fielded and permanent squads may only differ on a Loan rangers week, and the permanent squad cannot change on one:
+
+$$
+\begin{aligned}
+-\text{uteam}_w &\le \text{fielded}_{pw} - \text{permanent}_{pw} \le \text{uteam}_w, \\
+-(1 - \text{uteam}_w) &\le \text{permanent}_{pw} - \text{permanent}_{p,w-1} \le 1 - \text{uteam}_w .
+\end{aligned}
+$$
+
+As described above, the club limit is lifted, transfers are free, and banked transfers are kept. The Loan rangers squad must be affordable from the bank plus what the permanent squad is worth. A permanent player contributes $\mathrm{uteam\_credit}_{pw}$:
+
+$$
+\begin{aligned}
+\mathrm{uteam\_credit}_{pw} &\le \text{price}_{pw} \cdot \text{permanent}_{pw} && \text{(only held players contribute)} \\
+\mathrm{uteam\_credit}_{pw} &\le \mathrm{sale\_proceeds}_{pw} + \text{price}_{pw} \cdot \text{fielded}_{pw} && \text{(sale value, or full price if kept)} \\
+\sum_{p} \text{price}_{pw} \cdot \text{fielded}_{pw} &\le \text{bank}_w + \sum_{p} \mathrm{uteam\_credit}_{pw} && \text{(the squad must be affordable)}
+\end{aligned}
+$$
+
+A player who is kept in the Loan rangers squad contributes his full price, which cancels his cost on the left-hand side. A player who is swapped out contributes his sale value, and a player who is not held contributes nothing. In normal weeks the fielded squad equals the permanent squad, so every player counts as kept and the budget constraint holds automatically.
+
+::: {.callout-note collapse="true" title="Code: Loan rangers"}
+```{python}
+#| echo: false
+#| output: asis
+from optimizer.constraints import add_fielded_permanent_link, add_permanent_freeze_on_uteam, add_uteam_credit, add_uteam_budget
+show_source(add_fielded_permanent_link, add_permanent_freeze_on_uteam, add_uteam_credit, add_uteam_budget)
+```
+:::
+
+#### Pruning
+When pruning (see the results section), a pruned player and gameweek $(p, w)$ is simply excluded from both squads:
+
+$$
+\text{permanent}_{pw} = 0, \qquad \text{fielded}_{pw} = 0 .
+$$
+
+::: {.callout-note collapse="true" title="Code: pruning"}
+```{python}
+#| echo: false
+#| output: asis
+from optimizer.constraints import add_gameweek_pruning
+show_source(add_gameweek_pruning)
+```
+:::
+
+### Optimization
+We run the optimization with [GUROBI](https://www.gurobi.com/) through the Python [PuLP package](https://pypi.org/project/PuLP/). 
+
+
+## Results
+*Currently the problem has been solved until gameweek 22.*
+
+We first solve the full problem. The optimizer finished after around 33 hours, with the convergence shown in @fig-convergence. In the end the (proven) optimal score is **2861** points. We see that this score is found after around 2 hours, and the rest of the time is spent reducing the upper bound. The full optimal solution is found in @tbl-season-grid below. @tbl-positions shows the most important contributers per position. @tbl-clubs shows the contributions by each of the clubs (while Hammarby has the most utilized player, Djurgården is the most contributing club). 
+
+
+```{python}
+#| label: fig-convergence
+#| fig-cap: "Convergence of the optimizer: best found solution and upper bound (top), and the relative optimality gap (bottom). The plot starts when the gap first drops below 100%."
+#| echo: false
+import sys
+sys.path.append("..")
+from core.io import load_convergence, SOLUTIONS_DIR
+from core.plots import plot_convergence
+
+convergence_gw = 22
+if (SOLUTIONS_DIR / f"convergence_through_{convergence_gw:02d}.parquet").exists():
+    fig = plot_convergence(load_convergence(convergence_gw))
+else:
+    print(f"No convergence data saved for GW{convergence_gw} yet.")
+```
+
+::::{.column-screen-inset}
+::: {.callout-note collapse="true" title="The full season: click to show the best found solution, gameweek by gameweek"}
+```{python}
+#| echo: false
+import sys
+sys.path.append("..")
+from core.report import build_season_grid
+from core.io import load_solution, load_parquet, OUT_DIR
+
+picks, chips = load_solution(through_gw=22)
+stats = load_parquet("player_data.parquet", OUT_DIR)
+names = load_parquet("names.parquet", OUT_DIR)
+
+grid = build_season_grid(picks, chips, stats, names)
+
+```
+
+```{python}
+#| label: tbl-season-grid
+#| tbl-cap: "The best found solution: formation, squad and starting 11 per gameweek, with points, chips, budget and transfers. Bench points are shown in parentheses and do not count."
+#| echo: false
+styled = (
+    grid.style
+    .set_table_attributes('style="overflow-x:auto; display:block; width:100%;"')
+    .set_table_styles([
+        {"selector": "table", "props": "font-size: 0.9em; width: 100%;"},
+        {"selector": "tr", "props": "border-bottom: 1px solid #ddd;"},
+        {"selector": ".starters-end", "props": "border-bottom: 3px solid #333;"},
+        {"selector": "th, td", "props": "padding: 6px 10px; text-align: center; min-width: 160px;"},
+        {"selector": "th", "props": "background-color: #f5f5f5;"},
+    ])
+)
+styled
+```
+:::
+::::
+
+
+```{python}
+#| label: tbl-positions
+#| tbl-cap: "Points contributed per position (including captain and chip bonuses, before transfer penalties), and the top contributing player in each position with their number of starts and captaincies."
+#| echo: false
+import sys
+sys.path.append("..")
+from core.io import load_solution, load_parquet, OUT_DIR
+from core.report import player_contributions, position_summary
+
+summary_gw = 22
+picks, chips = load_solution(through_gw=summary_gw)
+contrib = player_contributions(picks, chips, load_parquet("player_data.parquet", OUT_DIR), load_parquet("names.parquet", OUT_DIR))
+positions = position_summary(contrib)
+top = contrib.iloc[0]
+positions.style.hide(axis="index")
+```
+
+```{python}
+#| label: tbl-clubs
+#| tbl-cap: "Clubs ranked by points contributed (including captain and chip bonuses, before transfer penalties), with the number of starts by the club's players and the club's top contributor."
+#| echo: false
+from core.report import club_summary
+
+clubs = club_summary(picks, chips, load_parquet("player_data.parquet", OUT_DIR), load_parquet("names.parquet", OUT_DIR))
+clubs.style.hide(axis="index")
+```
+
+
+### Pruning
+With the slow convergence of the full hindsight optimization problem, it is interesting to see how pruning can help. By pruning we mean the process of disregarding certain player-gameweek combinations completely to reduce the size of the problem and lower the computational time.
+
+We first consider the points/price ratio for every gameweek and player. We set a threshold and prune all player-gameweeks where the ratio falls below the threshold. In @fig-simple-threshold-pruning we show the optimal score and computation time (to 0 optimality gap) for a few different thresholds. 
+
+```{python}
+#| label: fig-simple-threshold-pruning
+#| fig-cap: "Optimal score against computation time when pruning all player-gameweeks with a points/price ratio below a threshold (the number next to each point). The grey point is the full problem without pruning. Each run is solved to optimality; note the logarithmic time axis."
+#| echo: false
+import pandas as pd
+from core.io import load_convergence, SOLUTIONS_DIR
+from core.plots import plot_pruning_tradeoff
+
+threshold_results = pd.read_parquet(SOLUTIONS_DIR / "threshold_pruning_score_per_price.parquet")
+unpruned = load_convergence(int(threshold_results["through_gw"].iloc[0]))
+fig = plot_pruning_tradeoff(threshold_results, reference=(unpruned["time"].iloc[-1], unpruned["best_obj"].iloc[-1]))
+```
+
+As expected, with this pruning we trade off points for computation time. But is it a good deal? Comparing to the optimal play in @tbl-season-grid, we see that this rather crude pruning disregards a lot of bench-players, for instance Ohlsson (Degerfors) in gameweek 1, who then takes place in the bus in gameweek 2 and delivers 26 ($=2 \cdot 13$) points. 
+
+An alternative method is to look at three consecutive gameweeks and only prune the middle gameweek if all of them fall below a certain threshold. We show a similar plot for this strategy in @fig-tripple-threshold-pruning. We reach at most 2858 (3 points gap to the full problem), but already in around 4.5 hours with the 0.6 threshold. This strategy is strictly better than the single gameweek pruning, but it still misses som piece in the full problem squad puzzle.  
+
+```{python}
+#| label: fig-tripple-threshold-pruning
+#| fig-cap: "Optimal score against computation time when pruning the middle gameweek of a player with points/price ratio below a threshold (the number next to each point) for three consecutive weeks."
+#| echo: false
+import pandas as pd
+from core.io import load_convergence, SOLUTIONS_DIR
+from core.plots import plot_pruning_tradeoff
+
+threshold_results = pd.read_parquet(SOLUTIONS_DIR / "threshold_pruning_three_score_per_price.parquet")
+unpruned = load_convergence(int(threshold_results["through_gw"].iloc[0]))
+fig = plot_pruning_tradeoff(threshold_results, reference=(unpruned["time"].iloc[-1], unpruned["best_obj"].iloc[-1]))
+```
+
+Finally, another obviously good strategy is to not play any Hammarby or AIK players at all (actually rules I follow myself). The optimal score under this assumption is **2742** points, a sacrifice of 119 points I am willing to make.
+
+## Open problems
+For those who are interested, here follows problems to work on.
+
+* **Prove that certain pruning strategies never reduce score**. It might be possible to prove that some players are truly useless, i.e., that there are always a strictly better alternative. Pruning such players would then speed up the solution of the problem without sacrifising points. Obviously the pruning strategy have to be general or simple, however you want to define that. The point is, of course one could prune all players who are not in @tbl-season-grid, but that is not very interesting or generalizable. 
+
+* **Ghost ship**. Many players forget about Fantasy Allsvenskan after a few weeks, some even after the first. It would be interesting to find out which is the optimal so-called ghost ship, i.e., a squad and starting 11 that are forgotten about and play the whole season. Maybe a chip can be played gameweek 1? For this problem, funtionality should be added letting bench players step in when some starting 11 players do not even come to the game. 
+
+* **Other fun player selections**. For instance: best team only playing at home, only playing at grass, only using Norwegians, etc. 
+
+## Code
+Our source code is available on [github](https://github.com/drmolno/hindsight-fantasy-allsvenskan).

@@ -1,6 +1,21 @@
 import pulp
 
 
+def _keys_by_gw(keys) -> dict:
+    by_gw = {}
+    for k in keys:
+        by_gw.setdefault(k[1], []).append(k)
+    return by_gw
+
+
+def _gws_by_player(keys) -> dict:
+    """player_id -> sorted list of the gws that player appears in."""
+    by_player = {}
+    for p, w in keys:
+        by_player.setdefault(p, []).append(w)
+    return {p: sorted(ws) for p, ws in by_player.items()}
+
+
 def add_squad_start_link(prob, keys, variables):
     fielded, start = variables["fielded"], variables["start"]
     for k in keys:
@@ -11,9 +26,10 @@ def add_squad_composition(prob, keys, variables, lookups, gws):
     fielded = variables["fielded"]
     pos = lookups["pos"]
     required = {"GK": 2, "DEF": 5, "MID": 5, "FWD": 3}
+    keys_by_gw = _keys_by_gw(keys)
 
     for w in gws:
-        keys_w = [k for k in keys if k[1] == w]
+        keys_w = keys_by_gw[w]
         for p, req in required.items():
             prob += pulp.lpSum(fielded[k] for k in keys_w if pos[k] == p) == req
 
@@ -21,9 +37,10 @@ def add_squad_composition(prob, keys, variables, lookups, gws):
 def add_formation(prob, keys, variables, lookups, gws):
     start = variables["start"]
     pos = lookups["pos"]
+    keys_by_gw = _keys_by_gw(keys)
 
     for w in gws:
-        keys_w = [k for k in keys if k[1] == w]
+        keys_w = keys_by_gw[w]
         prob += pulp.lpSum(start[k] for k in keys_w) == 11
         prob += pulp.lpSum(start[k] for k in keys_w if pos[k] == "GK") == 1
         prob += pulp.lpSum(start[k] for k in keys_w if pos[k] == "DEF") >= 3
@@ -36,29 +53,21 @@ def add_team_limit(prob, keys, variables, lookups, gws, max_per_team: int = 3):
     team = lookups["team"]
     uteam = variables["uteam"]
     M = 15 - max_per_team  # relax up to the full squad size, no further
+    keys_by_gw = _keys_by_gw(keys)
 
     for w in gws:
-        keys_w = [k for k in keys if k[1] == w]
+        keys_w = keys_by_gw[w]
         teams_w = {team[k] for k in keys_w}
         for t in teams_w:
-            if w in uteam:
-                prob += pulp.lpSum(fielded[k] for k in keys_w if team[k] == t) <= max_per_team + M * uteam[w]
-            else:
-                prob += pulp.lpSum(fielded[k] for k in keys_w if team[k] == t) <= max_per_team
-
+            prob += pulp.lpSum(fielded[k] for k in keys_w if team[k] == t) <= max_per_team + M * uteam[w]
+            
 
 def add_buy_sell_link(prob, keys, variables):
     permanent = variables["permanent"]
     buy = variables["buy"]
     sell = variables["sell"]
 
-    keys_by_player = {}
-    for k in keys:
-        p, w = k
-        keys_by_player.setdefault(p, []).append(w)
-
-    for p, player_gws in keys_by_player.items():
-        player_gws_sorted = sorted(player_gws)
+    for p, player_gws_sorted in _gws_by_player(keys).items():
         for i, w in enumerate(player_gws_sorted):
             k = (p, w)
             if i == 0:
@@ -78,16 +87,7 @@ def add_bought_price_tracking(prob, keys, variables, lookups):
     
     price = lookups["price_tenths"]
 
-    keys_by_player = {}
-    for k in keys:
-        p, w = k
-        keys_by_player.setdefault(p, []).append(w)
-
-    for p, player_gws in keys_by_player.items():
-    
-        player_gws_sorted = sorted(player_gws)
-
-
+    for p, player_gws_sorted in _gws_by_player(keys).items():
         for i, w in enumerate(player_gws_sorted):
             k = (p, w)
 
@@ -124,11 +124,11 @@ def add_bank_balance(prob, keys, variables, lookups, gws, initial_budget: float 
 
     initial_budget_tenths = round(initial_budget * 10)
 
-    keys_set = set(keys)
+    keys_by_gw = _keys_by_gw(keys)
     gws_sorted = sorted(gws)
 
     for i, w in enumerate(gws_sorted):
-        keys_w = [k for k in keys_set if k[1] == w] 
+        keys_w = keys_by_gw[w]
         spent = pulp.lpSum(price[k] * buy[k] for k in keys_w)
         earned = pulp.lpSum(sale_proceeds_actual[k] for k in keys_w)
 
@@ -157,41 +157,33 @@ def add_transfer_penalty(prob, keys, variables, gws, initial_free_transfers: int
     buy = variables["buy"]
     banked = variables["banked"]
     extra = variables["extra"]
-    leftover = variables["leftover"]
-    y = variables["over_zero"]
     wildcard = variables["wildcard"]
     uteam = variables["uteam"]
 
     gws_sorted = sorted(gws)
-    keys_set = set(keys)
+    keys_by_gw = _keys_by_gw(keys)
 
     for i, w in enumerate(gws_sorted):
-        transfers_used = pulp.lpSum(buy[k] for k in keys_set if k[1] == w)
+        transfers_used = pulp.lpSum(buy[k] for k in keys_by_gw[w])
 
         if i == 0:
+            # the initial squad is free and no transfers are banked from it
             prob += banked[w] == initial_free_transfers
             prob += extra[w] == 0
-            prob += leftover[w] == 0
             if i + 1 < len(gws_sorted):
-                w_next = gws_sorted[i + 1]
-                prob += banked[w_next] == leftover[w] + 1
+                prob += banked[gws_sorted[i + 1]] == initial_free_transfers
             continue
 
         freeze = wildcard[w] + uteam[w]
-        
-        prob += extra[w] >= transfers_used - banked[w] - big_m_transfers * freeze
 
-        prob += leftover[w] <= (banked[w] - transfers_used) + max_banked * (1 - y[w])
-        prob += leftover[w] >= (banked[w] - transfers_used) - max_banked * (1 - y[w])
-        prob += leftover[w] <= max_banked * y[w]
-        prob += leftover[w] >= -max_banked * y[w]
+        prob += extra[w] >= transfers_used - banked[w] - big_m_transfers * freeze
 
         if i + 1 < len(gws_sorted):
             w_next = gws_sorted[i + 1]
-            # normal accrual, UNLESS this week was a wildcard — then freeze banked forward unchanged
-            prob += banked[w_next] >= leftover[w] + 1 - max_banked * freeze
-            prob += banked[w_next] <= leftover[w] + 1 + max_banked * freeze
-            prob += banked[w_next] >= banked[w] - max_banked * (1 - freeze)
+            # Only upper bounds: more banked transfers is never worse, so the solver pushes banked up to them.
+            # Normal week: banked - transfers + extra = max(0, banked - transfers), and upBound caps banked at max_banked.
+            prob += banked[w_next] <= banked[w] - transfers_used + extra[w] + 1 + big_m_transfers * freeze
+            # Wildcard / uteam week: banked carries over unchanged
             prob += banked[w_next] <= banked[w] + max_banked * (1 - freeze)
 
 
@@ -205,8 +197,9 @@ def add_captain_constraints(prob, keys, variables, gws):
         prob += vice[k] <= start[k]      # same for vice
         prob += captain[k] + vice[k] <= 1  # can't be both
 
+    keys_by_gw = _keys_by_gw(keys)
     for w in gws:
-        keys_w = [k for k in keys if k[1] == w]
+        keys_w = keys_by_gw[w]
         prob += pulp.lpSum(captain[k] for k in keys_w) == 1
         prob += pulp.lpSum(vice[k] for k in keys_w) == 1
 
@@ -298,13 +291,7 @@ def add_permanent_freeze_on_uteam(prob, keys, variables):
     permanent = variables["permanent"]
     uteam = variables["uteam"]
 
-    keys_by_player = {}
-    for k in keys:
-        p, w = k
-        keys_by_player.setdefault(p, []).append(w)
-
-    for p, player_gws in keys_by_player.items():
-        player_gws_sorted = sorted(player_gws)
+    for p, player_gws_sorted in _gws_by_player(keys).items():
         for i, w in enumerate(player_gws_sorted):
             if i == 0:
                 continue
@@ -314,52 +301,34 @@ def add_permanent_freeze_on_uteam(prob, keys, variables):
             prob += permanent[k_prev] - permanent[k] <= 1 - uteam[w]
 
 
-def add_sale_value_if_held_linearization(prob, keys, variables, lookups):
+def add_uteam_credit(prob, keys, variables, lookups):
+    """uteam_credit = what a held player puts towards the Loan rangers budget:
+    his full price if he is kept in the fielded squad (cancelling his cost), his sale value if he is
+    swapped out, and 0 if he is not held. Only upper bounds: more budget is never worse."""
     sale_proceeds = variables["sale_proceeds"]
-    sale_value_if_held = variables["sale_value_if_held"]
+    uteam_credit = variables["uteam_credit"]
     permanent = variables["permanent"]
+    fielded = variables["fielded"]
     price = lookups["price_tenths"]
 
     for k in keys:
-        hi = price[k]
-        prob += sale_value_if_held[k] <= sale_proceeds[k]
-        prob += sale_value_if_held[k] <= hi * permanent[k]
-        prob += sale_value_if_held[k] >= sale_proceeds[k] - hi * (1 - permanent[k])
+        prob += uteam_credit[k] <= price[k] * permanent[k]
+        prob += uteam_credit[k] <= sale_proceeds[k] + price[k] * fielded[k]
 
 
 def add_uteam_budget(prob, keys, variables, lookups, gws):
+    """The fielded squad must be affordable from the bank plus the credit of the held players.
+    Outside Loan rangers weeks fielded == permanent, so every player is kept and this holds automatically."""
     fielded = variables["fielded"]
-    sale_value_if_held = variables["sale_value_if_held"]
+    uteam_credit = variables["uteam_credit"]
     bank = variables["bank"]
-    uteam = variables["uteam"]
     price = lookups["price_tenths"]
-    pos = lookups["pos"]
 
-    required = {"GK": 2, "DEF": 5, "MID": 5, "FWD": 3}
-    keys_set = set(keys)
-    gws_sorted = sorted(gws)
-    
-    for w in gws_sorted:
-        if w not in uteam:
-            continue
-        keys_w = [k for k in keys_set if k[1] == w]
-
-        keys_so_far = [k for k in keys_set if k[1] <= w]
-
+    keys_by_gw = _keys_by_gw(keys)
+    for w in sorted(gws):
+        keys_w = keys_by_gw[w]
         fielded_cost = pulp.lpSum(price[k] * fielded[k] for k in keys_w)
-        hypothetical_proceeds = pulp.lpSum(sale_value_if_held[k] for k in keys_w)
-        
-        M = 0
-        for p_name, count in required.items():
-            prices_this_week = [price[k] for k in keys_w if pos[k] == p_name]
-            prices_so_far = [price[k] for k in keys_so_far if pos[k] == p_name]
-
-            max_price_this_week = max(prices_this_week)
-            min_price_so_far = min(prices_so_far)
-
-            M += count * (max_price_this_week - min_price_so_far)
-
-        prob += fielded_cost <= bank[w] + hypothetical_proceeds + M * (1 - uteam[w])
+        prob += fielded_cost <= bank[w] + pulp.lpSum(uteam_credit[k] for k in keys_w)
 
 
 def add_gameweek_pruning(prob, variables, pruned_keys: set[tuple[int, int]]):

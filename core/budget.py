@@ -1,12 +1,9 @@
-import pandas as pd
-
-
 def sale_price(bought_price: int, current_price: int) -> int:
     profit = current_price - bought_price
     return bought_price + profit // 2 if profit > 0 else current_price
 
 
-def compute_budget_timeline(picks, stats, chips, initial_budget: float = 100.0, free_hit_chip: str = "uteam") -> list[dict]:
+def compute_budget_timeline(picks, chips, stats,initial_budget: float = 100.0, free_hit_chip: str = "uteam") -> list[dict]:
     price = {k: round(v * 10) for k, v in stats.set_index(["player_id", "gw"])["price"].items()}
     chip_by_gw = chips.set_index("gw")["chip"].to_dict() if len(chips) else {}
     squads = picks.groupby("gw")["player_id"].apply(set).to_dict()
@@ -35,7 +32,7 @@ def compute_budget_timeline(picks, stats, chips, initial_budget: float = 100.0, 
             cash_after = bank
             for pid in permanent - squad:
                 proceeds = sale_price(bought_price[pid], price[(pid, gw)])
-                sold.append((pid, proceeds))
+                sold.append((pid, proceeds, bought_price[pid]))
                 cash_after += proceeds
             for pid in squad - permanent:
                 bought.append((pid, price[(pid, gw)]))
@@ -45,7 +42,7 @@ def compute_budget_timeline(picks, stats, chips, initial_budget: float = 100.0, 
         else:
             for pid in permanent - squad:
                 proceeds = sale_price(bought_price[pid], price[(pid, gw)])
-                sold.append((pid, proceeds))
+                sold.append((pid, proceeds, bought_price[pid]))
                 bank += proceeds
                 del bought_price[pid]
             for pid in squad - permanent:
@@ -62,7 +59,7 @@ def compute_budget_timeline(picks, stats, chips, initial_budget: float = 100.0, 
             "squad_value": sum(price[(pid, gw)] for pid in squad),  # market value of the fielded squad
             "bank": bank,              # the permanent bank (unchanged on a uteam week)
             "cash_after": cash_after,  # what must be >= 0 (temp_bank on a uteam week)
-            "sold": sold,              # (player_id, proceeds)
+            "sold": sold,              # (player_id, proceeds, bought_price)
             "bought": bought,          # (player_id, price)
         })
 

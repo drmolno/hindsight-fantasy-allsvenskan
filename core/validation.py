@@ -1,5 +1,5 @@
 import pandas as pd
-from budget import compute_budget_timeline
+from core.budget import compute_budget_timeline
 
 
 def validate_team(picks: pd.DataFrame, chips: pd.DataFrame, stats: pd.DataFrame) -> list[str]:
@@ -45,22 +45,14 @@ def validate_team(picks: pd.DataFrame, chips: pd.DataFrame, stats: pd.DataFrame)
     return errors
 
 
-def sale_price(bought_price: int, current_price: int) -> int:
-    """Compute sale price in tenths, given bought and current price in tenths.
-    Profit: bought + floor(profit / 2). Loss: full loss, i.e. current price."""
-    profit = current_price - bought_price
-    if profit > 0:
-        return bought_price + profit // 2
-    else:
-        return current_price
-
-def validate_budget(picks, stats, chips, initial_budget: float = 100.0) -> list[str]:
+def validate_budget(picks, chips, stats, initial_budget: float = 100.0) -> list[str]:
     errors = []
-    for e in compute_budget_timeline(picks, stats, chips, initial_budget):
+    for e in compute_budget_timeline(picks, chips, stats, initial_budget):
         if e["cash_after"] < 0:
             label = " (uteam)" if e["temporary"] else ""
             errors.append(f"GW{e['gw']}{label}: budget exceeded, bank = {e['cash_after'] / 10:.1f}")
     return errors
+
 
 def validate_play(picks: pd.DataFrame, chips: pd.DataFrame, stats: pd.DataFrame, initial_budget: float = 100.0) -> list[str]:
     """Run all structural/legality checks. Returns combined error list."""

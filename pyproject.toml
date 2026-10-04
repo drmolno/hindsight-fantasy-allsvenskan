@@ -1,6 +1,12 @@
 [project]
 name = "fantasy-allsvenskan"
 version = "0.1.0"
+dependencies = [
+    "pandas",
+    "pulp",
+    "gurobipy",
+    "pyarrow",
+]
 
 [build-system]
 requires = ["setuptools"]

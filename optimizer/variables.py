@@ -19,13 +19,15 @@ def build_lookups(stats: pd.DataFrame) -> dict:
 
 
 def build_selection_variables(keys: list[tuple[int, int]]) -> dict:
-    permanent = {k: pulp.LpVariable(f"permanent_{k[0]}_{k[1]}", cat="Binary") for k in keys}
-    fielded = {k: pulp.LpVariable(f"fielded_{k[0]}_{k[1]}", cat="Binary") for k in keys}
-    start = {k: pulp.LpVariable(f"start_{k[0]}_{k[1]}", cat="Binary") for k in keys}
-    return {"permanent": permanent, "fielded": fielded, "start": start}
+    """Squad, starting 11 and captaincy, per player and gameweek."""
+    return {
+        name: {k: pulp.LpVariable(f"{name}_{k[0]}_{k[1]}", cat="Binary") for k in keys}
+        for name in ["permanent", "fielded", "start", "captain", "vice"]
+    }
 
 
 def build_budget_variables(keys: list[tuple[int, int]], gws, lookups: dict) -> dict:
+    """Buying, selling, prices and bank balance (all money in tenths)."""
     price = lookups["price_tenths"]
 
     player_prices = {}
@@ -39,18 +41,22 @@ def build_budget_variables(keys: list[tuple[int, int]], gws, lookups: dict) -> d
 
     bought_price = {}
     sale_proceeds = {}
-    sale_proceeds_actual = {} 
+    sale_proceeds_actual = {}
     for k in keys:
         p, w = k
         lo, hi = price_bounds[p]
-        
-        bought_price[k] = pulp.LpVariable(f"bought_price_{p}_{w}", lowBound=lo, upBound=hi, cat="Integer")           
-        sale_proceeds[k] = pulp.LpVariable(f"sale_proceeds_{p}_{w}", lowBound=0, upBound=hi, cat="Integer")          
-        sale_proceeds_actual[k] = pulp.LpVariable(f"sale_proceeds_actual_{p}_{w}", lowBound=0, upBound=hi, cat="Integer")  
+
+        bought_price[k] = pulp.LpVariable(f"bought_price_{p}_{w}", lowBound=lo, upBound=hi, cat="Integer")
+        sale_proceeds[k] = pulp.LpVariable(f"sale_proceeds_{p}_{w}", lowBound=0, upBound=hi, cat="Integer")
+        sale_proceeds_actual[k] = pulp.LpVariable(f"sale_proceeds_actual_{p}_{w}", lowBound=0, upBound=hi, cat="Integer")
 
     bank = {w: pulp.LpVariable(f"bank_{w}", lowBound=0, cat="Integer") for w in gws}
 
-    #big_m = {p: max(hi - lo, 1) for p, (lo, hi) in price_bounds.items()}   
+    # what each held player puts towards the Loan rangers budget
+    uteam_credit = {
+        k: pulp.LpVariable(f"uteam_credit_{k[0]}_{k[1]}", lowBound=0, upBound=price[k], cat="Integer")
+        for k in keys
+    }
 
     return {
         "buy": buy,
@@ -59,7 +65,7 @@ def build_budget_variables(keys: list[tuple[int, int]], gws, lookups: dict) -> d
         "sale_proceeds": sale_proceeds,
         "sale_proceeds_actual": sale_proceeds_actual,
         "bank": bank,
-        #"big_m": big_m,
+        "uteam_credit": uteam_credit,
     }
 
 
@@ -68,58 +74,25 @@ def build_transfer_variables(gws, max_banked: int = 5) -> dict:
 
     banked = {w: pulp.LpVariable(f"banked_{w}", lowBound=0, upBound=max_banked, cat="Integer") for w in gws_sorted}
     extra = {w: pulp.LpVariable(f"extra_transfers_{w}", lowBound=0, cat="Integer") for w in gws_sorted}
-    leftover = {w: pulp.LpVariable(f"leftover_{w}", lowBound=0, upBound=max_banked, cat="Integer") for w in gws_sorted}
-    over_zero = {w: pulp.LpVariable(f"over_zero_{w}", cat="Binary") for w in gws_sorted}
 
-    return {"banked": banked, "extra": extra, "leftover": leftover, "over_zero": over_zero}
+    return {"banked": banked, "extra": extra}
 
 
-def build_captain_variables(keys: list[tuple[int, int]]) -> dict:
-    captain = {k: pulp.LpVariable(f"captain_{k[0]}_{k[1]}", cat="Binary") for k in keys}
-    vice = {k: pulp.LpVariable(f"vice_{k[0]}_{k[1]}", cat="Binary") for k in keys}
-    return {"captain": captain, "vice": vice}
-
-
-def build_chip_variables(gws) -> dict:
-    two_capt = {w: pulp.LpVariable(f"2capt_{w}", cat="Binary") for w in gws}
-    return {"2capt": two_capt}
-
-
-def build_dynamic_duo_linearization_variables(keys: list[tuple[int, int]]) -> dict:
-    cap_2c = {k: pulp.LpVariable(f"cap_2c_{k[0]}_{k[1]}", cat="Binary") for k in keys}
-    vice_2c = {k: pulp.LpVariable(f"vice_2c_{k[0]}_{k[1]}", cat="Binary") for k in keys}
-    return {"cap_2c": cap_2c, "vice_2c": vice_2c}
-
-
-def build_pdbus_variables(gws) -> dict:
-    pdbus = {w: pulp.LpVariable(f"chippdbus_{w}", cat="Binary") for w in gws}
-    return {"pdbus": pdbus}
-
-
-def build_pdbus_linearization_variables(keys: list[tuple[int, int]]) -> dict:
-    start_pdbus = {k: pulp.LpVariable(f"start_pdbus_{k[0]}_{k[1]}", cat="Binary") for k in keys}
-    return {"start_pdbus": start_pdbus}
-
-
-def build_pdbus_captain_suppression_variables(keys: list[tuple[int, int]]) -> dict:
-    cap_pdbus = {k: pulp.LpVariable(f"cap_pdbus_{k[0]}_{k[1]}", cat="Binary") for k in keys}
-    return {"cap_pdbus": cap_pdbus}
-
-
-def build_wildcard_variables(gws) -> dict:
-    wildcard = {w: pulp.LpVariable(f"chipwildcard_{w}", cat="Binary") for w in gws}
-    return {"wildcard": wildcard}
-
-
-def build_uteam_variables(gws) -> dict:
-    uteam = {w: pulp.LpVariable(f"chiputeam_{w}", cat="Binary") for w in gws}
-    return {"uteam": uteam}
-
-
-def build_uteam_budget_variables(keys, lookups) -> dict:
-    price = lookups["price_tenths"]
-    sale_value_if_held = {
-        k: pulp.LpVariable(f"sale_value_if_held_{k[0]}_{k[1]}", lowBound=0, upBound=price[k], cat="Integer")
-        for k in keys
+def build_chip_variables(keys: list[tuple[int, int]], gws) -> dict:
+    """One flag per chip and gameweek, plus the per-player helpers that linearize the chip bonuses."""
+    flags = {
+        "2capt": {w: pulp.LpVariable(f"2capt_{w}", cat="Binary") for w in gws},
+        "pdbus": {w: pulp.LpVariable(f"chippdbus_{w}", cat="Binary") for w in gws},
+        "wildcard": {w: pulp.LpVariable(f"chipwildcard_{w}", cat="Binary") for w in gws},
+        "uteam": {w: pulp.LpVariable(f"chiputeam_{w}", cat="Binary") for w in gws},
     }
-    return {"sale_value_if_held": sale_value_if_held}
+    helpers = {
+        name: {k: pulp.LpVariable(f"{name}_{k[0]}_{k[1]}", cat="Binary") for k in keys}
+        for name in [
+            "cap_2c",       # captain on a Dynamic duo week
+            "vice_2c",      # vice captain on a Dynamic duo week
+            "start_pdbus",  # starter on a Park the bus week
+            "cap_pdbus",    # captain on a Park the bus week (loses the captain bonus)
+        ]
+    }
+    return flags | helpers

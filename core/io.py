@@ -20,15 +20,21 @@ def load_parquet(filename: str, directory: Path = OUT_DIR, verbose: bool = False
     return df
 
 
-def save_solution(picks: pd.DataFrame, through_gw: int, chips: pd.DataFrame | None = None,) -> None:
+def save_solution(picks: pd.DataFrame, chips: pd.DataFrame | None, through_gw: int, convergence: pd.DataFrame | None = None) -> None:
     if chips is None:
         chips = pd.DataFrame({"gw": pd.Series(dtype="int64"), "chip": pd.Series(dtype="string")})
 
     save_parquet(picks, f"picks_through_{through_gw:02d}.parquet", SOLUTIONS_DIR)
     save_parquet(chips, f"chips_through_{through_gw:02d}.parquet", SOLUTIONS_DIR)
+    if convergence is not None:
+        save_parquet(convergence, f"convergence_through_{through_gw:02d}.parquet", SOLUTIONS_DIR)
 
 
 def load_solution(through_gw: int) -> tuple[pd.DataFrame, pd.DataFrame]:
     picks = load_parquet(f"picks_through_{through_gw:02d}.parquet", SOLUTIONS_DIR)
     chips = load_parquet(f"chips_through_{through_gw:02d}.parquet", SOLUTIONS_DIR)
     return picks, chips
+
+
+def load_convergence(through_gw: int) -> pd.DataFrame:
+    return load_parquet(f"convergence_through_{through_gw:02d}.parquet", SOLUTIONS_DIR)
